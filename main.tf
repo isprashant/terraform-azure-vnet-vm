@@ -138,18 +138,18 @@ resource "azurerm_linux_virtual_machine" "oc_vm" {
   provisioner "local-exec" {
     command = templatefile("${var.host_os}-ssh-config.tpl", {
       hostname = self.public_ip_address,
-      user = "adminuser"
+      user     = "adminuser"
     })
-    interpreter = ["powershell", "-Command"]
+    interpreter = var.host_os == "windows" ? ["powershell", "-Command"] : ["bash", "-c"]
   }
 
   tags = {
-    environment="dev"
+    environment = "dev"
   }
 }
 
 data "azurerm_public_ip" "oc_ip_data" {
-  name = azurerm_public_ip.oc_ip.name
+  name                = azurerm_public_ip.oc_ip.name
   resource_group_name = azurerm_resource_group.oc_rg.name
 }
 
