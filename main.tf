@@ -8,10 +8,12 @@ terraform {
   }
 }
 
+
 provider "azurerm" {
   features {}
   subscription_id = "4d08eb22-ff8d-4693-ae72-2e8e33d392fc"
 }
+
 
 resource "azurerm_resource_group" "oc_rg" {
   name     = "oc-resources"
@@ -20,6 +22,7 @@ resource "azurerm_resource_group" "oc_rg" {
     environment = "dev"
   }
 }
+
 
 resource "azurerm_virtual_network" "oc_vn" {
   name                = "oc-network"
@@ -66,8 +69,90 @@ resource "azurerm_network_security_rule" "oc_dev_rule" {
   network_security_group_name = azurerm_network_security_group.oc_nsg.name
 }
 
+
 resource "azurerm_subnet_network_security_group_association" "oc_sga" {
   subnet_id                 = azurerm_subnet.oc_sn.id
   network_security_group_id = azurerm_network_security_group.oc_nsg.id
 }
 
+resource "azurerm_public_ip" "oc_ip" {
+  name                = "oc-ip"
+  resource_group_name = azurerm_resource_group.oc_rg.name
+  location            = azurerm_resource_group.oc_rg.location
+  allocation_method   = "Static"
+
+  tags = {
+    environment = "dev"
+  }
+}
+
+
+resource "azurerm_network_interface" "oc_nic" {
+  name                = "oc-nic"
+  location            = azurerm_resource_group.oc_rg.location
+  resource_group_name = azurerm_resource_group.oc_rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.oc_sn.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.oc_ip.id
+  }
+
+  tags = {
+    environment = "dev"
+  }
+}
+
+
+resource "azurerm_linux_virtual_machine" "oc_vm" {
+  name                = "oc-vm-1"
+  resource_group_name = azurerm_resource_group.oc_rg.name
+  location            = azurerm_resource_group.oc_rg.location
+  size                = "Standard_D2as_v5"
+  admin_username      = "adminuser"
+  network_interface_ids = [
+    azurerm_network_interface.oc_nic.id,
+  ]
+
+  custom_data = filebase64("customedata.tpl")
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+
+  admin_ssh_key {
+    username   = "adminuser"
+    public_key = file("~/.ssh/id_rsa.pub")
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "ubuntuServer"
+    sku       = "18.04-lts"
+    version   = "latest"
+  }
+
+  provisioner "local-exec" {
+    command = templatefile("${var.host_os}-ssh-config.tpl", {
+      hostname = self.public_ip_address,
+      user = "adminuser"
+    })
+    interpreter = ["powershell", "-Command"]
+  }
+
+  tags = {
+    environment="dev"
+  }
+}
+
+data "azurerm_public_ip" "oc_ip_data" {
+  name = azurerm_public_ip.oc_ip.name
+  resource_group_name = azurerm_resource_group.oc_rg.name
+}
+
+output "public_ip_address" {
+  value = "${azurerm_linux_virtual_machine.oc_vm.name}: ${data.azurerm_public_ip.oc_ip_data.ip_address}"
+}
